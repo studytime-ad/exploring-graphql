@@ -1,13 +1,16 @@
-from ariadne import QueryType, graphql_sync, make_executable_schema
+from ariadne import graphql_sync, make_executable_schema, ObjectType, QueryType, MutationType
 from ariadne.explorer import ExplorerGraphiQL
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, current_app
 from flask_sqlalchemy import SQLAlchemy
+import logging
+logging.basicConfig(level=logging.DEBUG)  # Enable debug logging
+
 
 app = Flask(__name__)
 
 try:
     # Attempt to set the database URI
-    app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///project.db"
+    app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///posts.db"
     db = SQLAlchemy(app)
 except Exception as e:
     print(f"Error configuring database: {e}")
@@ -16,27 +19,51 @@ except Exception as e:
 
 type_defs = """
     type Post {
-        id: ID!
-        title: String!
-        body: String!
+        id: ID
+        title: String
+        body: String
     }
 
     type Query {
-        posts: [Post!]!  # List of non-nullable posts
+        hello: String!
+        posts(offset: Int, limit: Int): [Post!]!  # List of non-nullable posts
     }
+
+    type Mutation {
+        createPost(title: String!, body: String!): Post!
+    }
+
 """
 
 query = QueryType()
+mutation = MutationType()
+
+@query.field("hello")
+def resolve_posts(obj, info):
+    return "Hi"
 
 @query.field("posts")
-def resolve_posts(obj, info):
-    print(info)
-    return Post.query.all()  # Fetch all posts
+def resolve_posts(obj, info, offset=0, limit=10):
+    # return Post.query.all()  # Fetch all posts
+    return Post.query.offset(offset).limit(limit)  # Fetch a chunk of posts
 
-schema = make_executable_schema(type_defs, query)
+@mutation.field("createPost")
+def resolve_create_post(obj, info, title, body):
+    if not title or not body:
+        raise Exception("Please provide title and body for the post.")
+
+    new_post = Post(title=title, body=body)
+    try:
+        db.session.add(new_post)
+        db.session.commit()
+    except Exception as e:
+        raise Exception("Exception caused " + str(e))
+    return new_post
+
+schema = make_executable_schema(type_defs, [query, mutation])
 
 class Post(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     title = db.Column(db.String(80))
     body = db.Column(db.Text)
     
